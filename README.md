@@ -60,7 +60,6 @@ npm install
 EXPO_PUBLIC_FIREBASE_API_KEY=your-api-key
 EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
 EXPO_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
-EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
 EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
 EXPO_PUBLIC_FIREBASE_APP_ID=your-app-id
 
@@ -153,6 +152,20 @@ Each user profile in Firestore contains:
   "analyticsEnabled": true
 }
 ```
+
+## Additional Features
+
+### MongoDB Integration (Chat History)
+- Chat history and conversation data stored in MongoDB
+- Separate from Firebase for scalability and cost efficiency
+- n8n workflows can integrate with MongoDB for persistent chat storage
+
+### Code Change Detection (Future Feature)
+- **Advanced Feature**: When entire codebase is in context, detect only changed code
+- **Implementation**: Git integration or file system monitoring
+- **Storage**: Previous code states stored in MongoDB or Firebase
+- **Comparison**: Diff algorithm to show only modified sections
+- **Benefits**: Faster analysis, reduced API costs, focused feedback
 
 ## Technical Stack
 

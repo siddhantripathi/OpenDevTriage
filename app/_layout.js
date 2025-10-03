@@ -5,6 +5,13 @@ import { auth } from '../firebase';
 import { ActivityIndicator, View } from 'react-native';
 import { PaperProvider } from 'react-native-paper';
 
+// Debug Firebase config
+console.log('Firebase config loaded:', {
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ? '***' : 'missing',
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+});
+
 export default function RootLayout() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);

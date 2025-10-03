@@ -2,7 +2,7 @@
 .env
 # dependencies
 node_modules/
-
+opendev-triage-firebase-adminsdk-fbsvc-4bba3e1c3f.json
 # Expo
 .expo/
 dist/

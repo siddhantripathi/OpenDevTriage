@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { auth } from '../firebase';
 import { Card, Button, TextInput as PaperTextInput, Chip } from 'react-native-paper';
 import { MaterialIcons } from '@expo/vector-icons';
 import axios from 'axios';
@@ -19,6 +20,10 @@ export default function CodeReviewScreen() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [selectedLanguage, setSelectedLanguage] = useState('javascript');
+  const [repositories, setRepositories] = useState([]);
+  const [selectedRepo, setSelectedRepo] = useState('');
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [useRepoMode, setUseRepoMode] = useState(false);
 
   const languages = [
     { label: 'JavaScript', value: 'javascript' },
@@ -33,22 +38,89 @@ export default function CodeReviewScreen() {
     { label: 'Ruby', value: 'ruby' },
   ];
 
-  const handleSubmitReview = async () => {
-    if (!code.trim()) {
-      Alert.alert('Error', 'Please enter some code to review');
+  // Fetch user's repositories from GitHub
+  const fetchUserRepositories = async () => {
+    if (!auth.currentUser) {
+      Alert.alert('Error', 'Please sign in first');
       return;
+    }
+
+    setLoadingRepos(true);
+    try {
+      const token = await auth.currentUser.getIdToken();
+      const response = await axios.get('https://api.github.com/user/repos', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        params: {
+          type: 'owner',
+          sort: 'updated',
+          per_page: 50
+        }
+      });
+
+      // Filter for public repositories only
+      const publicRepos = response.data.filter(repo => !repo.private);
+      setRepositories(publicRepos);
+    } catch (error) {
+      console.error('Error fetching repositories:', error);
+      Alert.alert('Error', 'Failed to fetch repositories. Please check your GitHub connection.');
+    } finally {
+      setLoadingRepos(false);
+    }
+  };
+
+  // Toggle between manual code input and repository selection
+  const toggleMode = () => {
+    setUseRepoMode(!useRepoMode);
+    if (!useRepoMode) {
+      fetchUserRepositories();
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    // Validation based on mode
+    if (useRepoMode) {
+      if (!selectedRepo) {
+        Alert.alert('Error', 'Please select a repository');
+        return;
+      }
+    } else {
+      if (!code.trim()) {
+        Alert.alert('Error', 'Please enter some code to review');
+        return;
+      }
     }
 
     setLoading(true);
     try {
       const n8nWebhookUrl = Constants.expoConfig?.extra?.EXPO_PUBLIC_N8N_WEBHOOK_URL || 'YOUR_N8N_WEBHOOK_URL';
 
-      const response = await axios.post(n8nWebhookUrl, {
-        code: code.trim(),
-        language: selectedLanguage,
-        timestamp: new Date().toISOString(),
-      });
+      let requestData;
+      if (useRepoMode) {
+        // Repository analysis mode
+        const [owner, repo] = selectedRepo.split('/');
+        requestData = {
+          repository: repo,
+          owner: owner,
+          branch: 'main', // Default to main branch
+          analysisType: 'full_repository',
+          userId: auth.currentUser?.uid,
+          timestamp: new Date().toISOString(),
+        };
+      } else {
+        // Single code analysis mode
+        requestData = {
+          code: code.trim(),
+          language: selectedLanguage,
+          analysisType: 'single_code',
+          userId: auth.currentUser?.uid,
+          timestamp: new Date().toISOString(),
+        };
+      }
 
+      const response = await axios.post(n8nWebhookUrl, requestData);
       setResult(response.data);
     } catch (error) {
       console.error('Error submitting code review:', error);
@@ -156,61 +228,121 @@ export default function CodeReviewScreen() {
                 <MaterialIcons name="arrow-back" size={24} color="#2563eb" />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Code Review</Text>
-              <View style={styles.headerSpacer} />
+              <TouchableOpacity onPress={toggleMode} style={styles.modeToggle}>
+                <Text style={styles.modeToggleText}>
+                  {useRepoMode ? 'Manual Mode' : 'Repo Mode'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Language Selection */}
-            <Card style={styles.languageCard}>
-              <Card.Content>
-                <Text style={styles.sectionTitle}>Select Language</Text>
-                <View style={styles.languageChips}>
-                  {languages.map((lang) => (
-                    <Chip
-                      key={lang.value}
-                      selected={selectedLanguage === lang.value}
-                      onPress={() => setSelectedLanguage(lang.value)}
-                      style={[
-                        styles.languageChip,
-                        selectedLanguage === lang.value && styles.selectedChip
-                      ]}
-                    >
-                      {lang.label}
-                    </Chip>
-                  ))}
-                </View>
-              </Card.Content>
-            </Card>
+            {useRepoMode ? (
+              /* Repository Selection Mode */
+              <Card style={styles.repoCard}>
+                <Card.Content>
+                  <Text style={styles.sectionTitle}>Select Repository</Text>
+                  {loadingRepos ? (
+                    <View style={styles.loadingContainer}>
+                      <ActivityIndicator size="small" color="#2563eb" />
+                      <Text style={styles.loadingText}>Loading repositories...</Text>
+                    </View>
+                  ) : repositories.length > 0 ? (
+                    <View style={styles.repoSelector}>
+                      <ScrollView style={styles.repoList} showsVerticalScrollIndicator={false}>
+                        {repositories.map((repo) => (
+                          <TouchableOpacity
+                            key={repo.id}
+                            style={[
+                              styles.repoItem,
+                              selectedRepo === `${repo.owner.login}/${repo.name}` && styles.selectedRepoItem
+                            ]}
+                            onPress={() => setSelectedRepo(`${repo.owner.login}/${repo.name}`)}
+                          >
+                            <View style={styles.repoInfo}>
+                              <Text style={styles.repoName}>{repo.name}</Text>
+                              <Text style={styles.repoDescription}>
+                                {repo.description || 'No description available'}
+                              </Text>
+                              <View style={styles.repoMeta}>
+                                <Text style={styles.repoLanguage}>{repo.language}</Text>
+                                <Text style={styles.repoStars}>⭐ {repo.stargazers_count}</Text>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  ) : (
+                    <TouchableOpacity style={styles.loadReposButton} onPress={fetchUserRepositories}>
+                      <MaterialIcons name="refresh" size={20} color="#2563eb" />
+                      <Text style={styles.loadReposText}>Load Repositories</Text>
+                    </TouchableOpacity>
+                  )}
+                </Card.Content>
+              </Card>
+            ) : (
+              /* Manual Code Input Mode */
+              <>
+                {/* Language Selection */}
+                <Card style={styles.languageCard}>
+                  <Card.Content>
+                    <Text style={styles.sectionTitle}>Select Language</Text>
+                    <View style={styles.languageChips}>
+                      {languages.map((lang) => (
+                        <Chip
+                          key={lang.value}
+                          selected={selectedLanguage === lang.value}
+                          onPress={() => setSelectedLanguage(lang.value)}
+                          style={[
+                            styles.languageChip,
+                            selectedLanguage === lang.value && styles.selectedChip
+                          ]}
+                        >
+                          {lang.label}
+                        </Chip>
+                      ))}
+                    </View>
+                  </Card.Content>
+                </Card>
+              </>
+            )}
 
-            {/* Code Input */}
-            <Card style={styles.codeCard}>
-              <Card.Content>
-                <Text style={styles.sectionTitle}>Paste Your Code</Text>
-                <PaperTextInput
-                  value={code}
-                  onChangeText={setCode}
-                  placeholder="Enter your code here for analysis..."
-                  multiline
-                  numberOfLines={12}
-                  mode="outlined"
-                  style={styles.codeInput}
-                  textAlignVertical="top"
-                />
-                <Text style={styles.codeHint}>
-                  Tip: You can paste code from GitHub, GitLab, or any code editor
-                </Text>
-              </Card.Content>
-            </Card>
+            {/* Code Input - Only show in manual mode */}
+            {!useRepoMode && (
+              <Card style={styles.codeCard}>
+                <Card.Content>
+                  <Text style={styles.sectionTitle}>Paste Your Code</Text>
+                  <PaperTextInput
+                    value={code}
+                    onChangeText={setCode}
+                    placeholder="Enter your code here for analysis..."
+                    multiline
+                    numberOfLines={12}
+                    mode="outlined"
+                    style={styles.codeInput}
+                    textAlignVertical="top"
+                  />
+                  <Text style={styles.codeHint}>
+                    Tip: You can paste code from GitHub, GitLab, or any code editor
+                  </Text>
+                </Card.Content>
+              </Card>
+            )}
 
             {/* Submit Button */}
             <Button
               mode="contained"
               onPress={handleSubmitReview}
               loading={loading}
-              disabled={loading || !code.trim()}
+              disabled={loading || (!useRepoMode && !code.trim()) || (useRepoMode && !selectedRepo)}
               style={styles.submitButton}
               icon="send"
             >
-              {loading ? 'Analyzing...' : 'Analyze Code'}
+              {loading
+                ? 'Analyzing...'
+                : useRepoMode
+                  ? 'Analyze Repository'
+                  : 'Analyze Code'
+              }
             </Button>
           </>
         ) : (
@@ -322,6 +454,17 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
+  modeToggle: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 16,
+  },
+  modeToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563eb',
+  },
   resultsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -377,6 +520,86 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  repoCard: {
+    marginBottom: 20,
+    elevation: 2,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#64748b',
+  },
+  repoSelector: {
+    maxHeight: 300,
+  },
+  repoList: {
+    maxHeight: 250,
+  },
+  repoItem: {
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  selectedRepoItem: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#2563eb',
+  },
+  repoInfo: {
+    flex: 1,
+  },
+  repoName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  repoDescription: {
+    fontSize: 14,
+    color: '#64748b',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  repoMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  repoLanguage: {
+    fontSize: 12,
+    color: '#059669',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  repoStars: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  loadReposButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+  },
+  loadReposText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#2563eb',
+    fontWeight: '500',
   },
   submitButton: {
     backgroundColor: '#2563eb',
